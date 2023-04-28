@@ -1,0 +1,211 @@
+---
+title: "Spatial autocorrelation"
+author: "Compiled from many resources"
+date: "2023-01-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Autocorrelation
+
+Autocorrelation (whether spatial or not) is a measure of similarity (correlation) between nearby observations. To understand spatial autocorrelation, it helps to first consider temporal autocorrelation.
+
+If you measure something about the same object over time, for example a persons weight or wealth, it is likely that two observations that are close to each other in time are also similar in measurement. Say that over a couple of years your weight went from 50 to 80 kg. It is unlikely that it was 60 kg one day, 50 kg the next and 80 the day after that. Rather it probably went up gradually, with the occasional tapering off, or even reverse in direction. The same may be true with your bank account, but that may also have a marked monthly trend. To measure the degree of association over time, we can compute the correlation of each observation with the next observation.
+
+```{r autocorrelation}
+set.seed(0)
+d <- sample(100, 10)
+d
+```
+
+
+```{r autocorrelation}
+set.seed(0)
+d <- sample(100, 10)
+d
+##  [1]  14  68  39   1  34  87  43 100  82  59
+
+# compute autocorrelation
+  # We computed the “one-lag” autocorrelation, that is, we compare each value to its immediate neighbour, and not to other nearby values.
+a <- d[-length(d)] # remove the last value
+b <- d[-1] # remove the first value
+plot(a, b, xlab='t', ylab='t-1')
+
+d <- sort(d) # out the values in order
+d
+##  [1]   1  14  34  39  43  59  68  82  87 100
+# calc autocorrelation again
+a <- d[-length(d)]
+b <- d[-1]
+plot(a, b, xlab='t', ylab='t-1')
+cor(a, b)
+## [1] 0.9819258
+
+acf(d)
+
+
+```
+
+## Spatial autocorrelation
+
+Measures of spatial autocorrelation describe the degree two which observations (values) at spatial locations (whether they are points, areas, or raster cells), are similar to each other. So we need two things: observations and locations.
+
+Spatial autocorrelation in a variable can be exogenous (it is caused by another spatially autocorrelated variable, e.g. rainfall) or endogenous (it is caused by the process at play, e.g. the spread of a disease).
+
+```{r spatial }
+library(terra)
+p <- vect(system.file("ex/lux.shp", package="terra"))
+p <- p[p$NAME_1=="Diekirch", ]
+p$value <- c(10, 6, 4, 11, 6)
+as.data.frame(p)
+
+```
+
+Let’s say we are interested in spatial autocorrelation in variable “AREA”. If there were spatial autocorrelation, regions of a similar size would be spatially clustered.
+
+Here is a plot of the polygons. I use the coordinates function to get the centroids of the polygons to place the labels.
+
+
+```{r plot}
+par(mai=c(0,0,0,0))
+plot(p, col=2:7)
+xy <- centroids(p)
+points(xy, cex=6, pch=20, col='white')
+text(p, 'ID_2', cex=1.5)
+```
+
+Now we need to determine which polygons are “near”, and how to quantify that. Here we’ll use adjacency as criterion. To find adjacent polygons, we can use package ‘spdep’.
+
+```{r adjacent}
+w <- adjacent(p, symmetrical=TRUE)
+class(w)
+head(w)
+summary(w)
+w
+```
+
+
+Plot the links between the polygons.
+
+```{r links}
+plot(p, col='gray', border='blue', lwd=2)
+p1 <- xy[w[,1], ]
+p2 <- xy[w[,2], ]
+lines(p1, p2, col='red', lwd=2)
+## Warning in plot.xy(xy.coords(x, y), type = type, ...): "alpha" is not a
+## graphical parameter
+```
+
+
+
+Make a spatial weights matrix, reflecting the intensity of the geographic relationship between observations
+
+```{r weightsMatrix}
+wm <- adjacent(p, pairs=FALSE)
+wm
+```
+
+## Compute Moran's I - by hand
+
+```{r moran}
+n <- length(p)
+y <- p$value
+ybar <- mean(y)
+
+yi <- rep(dy, each=n)
+yj <- rep(dy)
+yiyj <- yi * yj
+pm <- matrix(yiyj, ncol=n) # matrix of the multiplied pairs
+pmw <- pm * wm #  multiply this matrix with the weights to set to zero the value for the pairs that are not adjacent.
+pmw
+spmw <- sum(pmw)
+spmw
+smw <- sum(wm)
+sw  <- spmw / smw # divide this value by the sum of weights
+vr <- n / sum(dy^2) # inverse variance of y
+MI <- vr * sw # compute Moran’s I
+MI
+```
+
+
+## Compute Moran's I - spdep
+Using the spdep package
+
+
+```{r spdep}
+ww <-  adjacent(p, "queen", pairs=FALSE) # calc the weights
+ww
+ac <- autocor(p$value, ww, "moran")
+ac
+```
+
+
+test for significance using Monte Carlo simulation
+```{r}
+m <- sapply(1:99, function(i) {
+    autocor(sample(p$value), ww, "moran")
+})
+hist(m)
+pval <- sum(m >= ac) / 100
+pval
+```
+how to interpret?
+
+## Moran's I -
+
+```{r scatter}
+# We first get the neighbouring values for each value.
+n <- length(p)
+ms <- cbind(id=rep(1:n, each=n), y=rep(y, each=n), value=as.vector(wm * y))
+# remove zeros
+ms <- ms[ms[,3] > 0, ]
+# compute the average neighbour value
+ams <- aggregate(ms[,2:3], list(ms[,1]), FUN=mean)
+ams <- ams[,-1]
+colnames(ams) <- c('y', 'spatially lagged y')
+head(ams)
+
+plot(ams, pch=20, col="red", cex=2)
+reg <- lm(ams[,2] ~ ams[,1])
+abline(reg, lwd=2)
+abline(h=mean(ams[,2]), lt=2)
+abline(v=ybar, lt=2)
+
+```
+
+Calc the slope value for the regression line
+```{r slope}
+coefficients(reg)[2]
+##  ams[, 1]
+## 0.2315341
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
